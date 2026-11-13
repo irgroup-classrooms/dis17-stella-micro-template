@@ -1,35 +1,101 @@
-"""Microservice for search."""
-from flask import Flask, request, jsonify, redirect
-from search_engine import SearchEngine
+"""Search microservice.
 
-# TODO: Refactor to use FastAPI for strict typing.
+API configuration is in ``data/api-conf.yaml``.
 
-app = Flask(__name__)
-search_engine = SearchEngine()
+Usage:
+    python app.py
+    uvicorn app:app --host 0.0.0.0 --port 5000 --reload
+"""
+
+import os
+from pathlib import Path
+from typing import Annotated, Any, Dict
+
+import uvicorn
+import yaml
+from fastapi import FastAPI, HTTPException, Query
+from starlette import status
+from fastapi.responses import PlainTextResponse, RedirectResponse
+
+from models import RetrievalResponse
+from elasticsearch import Elasticsearch
+
+CONFIG_PATH = Path(__file__).parent / "config" / "api-conf.yaml"
 
 
-@app.route("/")
-def redirect_to_test():
-    return redirect("/test", code=302)
+def load_config(path: Path) -> Dict[str, Any]:
+    """Loads the API configuration from a YAML file.
+    
+    Args:
+        path: YAML file path.
+
+    Raises:
+        FileNotFoundError: If the YAML file does not exist.
+
+    Returns:
+        A dictionary containing the API configuration.
+    """
+    if not path.is_file():
+        raise FileNotFoundError(f"Configuration file not found: {path}")
+    
+    with path.open(encoding="utf-8") as file:
+        return yaml.safe_load(file)["api"]
+
+config = load_config(CONFIG_PATH)
 
 
-@app.route("/test", methods=["GET"])
-def test():
-    return "Container is running", 200
+app = FastAPI(
+    title=config["title"],
+    summary=config.get("summary"),
+    description=config["description"],
+    version=config["version"],
+    contact=config.get("contact"),
+    openapi_tags=config.get("tags"),
+    docs_url=config["docs"]["swagger_ui"],
+    redoc_url=config["docs"]["redoc"],
+    openapi_url=config["docs"]["openapi_json"],
+)
+
+es_client = Elasticsearch(os.environ.get("ELASTICSEARCH_URL", "http://localhost:9200"))
+ES_INDEX_NAME = os.environ.get("INDEX_NAME", "products")
+
+@app.get("/", include_in_schema=False)
+def redirect_to_docs() -> RedirectResponse:
+    """Redirects the root path to the Swagger UI."""
+    return RedirectResponse(url=config["docs"]["swagger_ui"], status_code=status.HTTP_302_FOUND)
 
 
-@app.route("/index", methods=["GET"])
-def index():
-    search_engine.index()
-    return "Indexing done!", 200
+@app.get("/health", **config["endpoints"]["health"])
+def test() -> PlainTextResponse:
+    """Checks if the service is running."""
+    return PlainTextResponse("Service is running!")
 
 
-@app.route("/ranking", methods=["GET"])
-def retrieve():
-    query = request.args.get("query", None)
-    response = search_engine.retrieve(query)
-    return jsonify(response)
+@app.get("/index", **config["endpoints"]["index"])
+def index() -> PlainTextResponse:
+    """Triggers (re)indexing of all documents."""
+    if not es_client.ping():
+        raise HTTPException(status_code=503, detail="Elasticsearch is not reachable. Check the URL in the environment variables.")
+
+    # TODO: Implement the actual indexing logic here.
+    return PlainTextResponse("No documents indexed yet. Implement the indexing logic in the /index endpoint and change this message.", status_code=status.HTTP_200_OK)
+
+
+@app.get("/ranking", **config["endpoints"]["ranking"])
+def retrieve(
+    query: Annotated[str, Query(min_length=1, description="Search query.", example="running shoes")],
+) -> RetrievalResponse:
+    """Retrieves ranked results for a query."""
+    if not es_client.ping():
+        raise HTTPException(status_code=503, detail="Elasticsearch is not reachable. Check the URL in the environment variables.")
+
+    if not es_client.indices.exists(index=ES_INDEX_NAME):
+        raise HTTPException(status_code=404, detail="Index not found.")
+
+    # TODO: Implement the actual search logic here.
+    results = None  # Replace with actual search results from Elasticsearch.
+    return RetrievalResponse(itemlist=results)
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

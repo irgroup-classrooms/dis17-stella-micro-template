@@ -1,0 +1,57 @@
+api:
+  version: 1.0.0
+  title: Search Microservice API
+  summary: Index documents and retrieve ranked search results.
+  description: |
+    Microservice for **indexing** documents and **retrieving** them ranked against a query.
+
+    ## Endpoints
+    * **/health** – check that the microservice is running.
+    * **/index** – (re)build the search index.
+    * **/ranking** – retrieve ranked results for a query.
+  contact:
+    name: DIS17.1 Instructor
+
+  docs:
+    swagger_ui: /docs
+    redoc: /redoc
+    openapi_json: /openapi.json
+
+  endpoints:
+    health:
+      summary: Health check
+      description: Return a plain-text message confirming the service is alive.
+      responses:
+        200:
+          description: Service is running.
+          example: Service is running!
+    index:
+      summary: Build the search index
+      description: >
+        Trigger (re)indexing of all documents. This is a blocking,
+        potentially long-running operation; the response is returned only
+        once indexing has completed.
+      responses:
+        200:
+          description: Indexing finished.
+          example: Indexing done!
+        500:
+          description: Indexing failed.
+          example: Indexing failed due to an internal error.
+        503:
+          description: Elasticsearch is not reachable.
+          example: Elasticsearch is not reachable. Check the URL in the environment variables.
+    ranking:
+      summary: Retrieve ranked results for a query
+      description: >
+        Rank indexed documents against the given query. Results are sorted
+        by relevance score.
+      responses:
+        200:
+          description: Ranked results ordered by relevance score.
+        503:
+          description: Elasticsearch is not reachable.
+          example: Elasticsearch is not reachable. Check the URL in the environment variables.
+        404:
+          description: Index not found.
+          example: Index not found.
