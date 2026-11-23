@@ -1,10 +1,11 @@
 """Search microservice.
 
-API configuration is in ``data/api-conf.yaml``.
+API configuration is in ``config/api-conf.yaml``.
 
 Usage:
     python app.py
-    uvicorn app:app --host 0.0.0.0 --port 5000 --reload
+    OR
+    uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 """
 
 import os
@@ -13,19 +14,22 @@ from typing import Annotated, Any, Dict
 
 import uvicorn
 import yaml
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from starlette import status
 from fastapi.responses import PlainTextResponse, RedirectResponse
 
-from models import RetrievalResponse
+from models import RetrievalResponse, RunRetrievalResponse
 from elasticsearch import Elasticsearch
+
+load_dotenv()
 
 CONFIG_PATH = Path(__file__).parent / "config" / "api-conf.yaml"
 
 
 def load_config(path: Path) -> Dict[str, Any]:
     """Loads the API configuration from a YAML file.
-    
+
     Args:
         path: YAML file path.
 
@@ -37,9 +41,10 @@ def load_config(path: Path) -> Dict[str, Any]:
     """
     if not path.is_file():
         raise FileNotFoundError(f"Configuration file not found: {path}")
-    
+
     with path.open(encoding="utf-8") as file:
         return yaml.safe_load(file)["api"]
+
 
 config = load_config(CONFIG_PATH)
 
@@ -59,10 +64,13 @@ app = FastAPI(
 es_client = Elasticsearch(os.environ.get("ELASTICSEARCH_URL", "http://localhost:9200"))
 ES_INDEX_NAME = os.environ.get("INDEX_NAME", "products")
 
+
 @app.get("/", include_in_schema=False)
 def redirect_to_docs() -> RedirectResponse:
     """Redirects the root path to the Swagger UI."""
-    return RedirectResponse(url=config["docs"]["swagger_ui"], status_code=status.HTTP_302_FOUND)
+    return RedirectResponse(
+        url=config["docs"]["swagger_ui"], status_code=status.HTTP_302_FOUND
+    )
 
 
 @app.get("/health", **config["endpoints"]["health"])
@@ -75,26 +83,45 @@ def test() -> PlainTextResponse:
 def index() -> PlainTextResponse:
     """Triggers (re)indexing of all documents."""
     if not es_client.ping():
-        raise HTTPException(status_code=503, detail="Elasticsearch is not reachable. Check the URL in the environment variables.")
+        raise HTTPException(
+            status_code=503,
+            detail="Elasticsearch is not reachable. Check the URL in the environment variables.",
+        )
 
     # TODO: Implement the actual indexing logic here.
-    return PlainTextResponse("No documents indexed yet. Implement the indexing logic in the /index endpoint and change this message.", status_code=status.HTTP_200_OK)
+    return PlainTextResponse(
+        "No documents indexed yet. Implement the indexing logic in the /index endpoint and change this message.",
+        status_code=status.HTTP_200_OK,
+    )
 
 
 @app.get("/ranking", **config["endpoints"]["ranking"])
 def retrieve(
-    query: Annotated[str, Query(min_length=1, description="Search query.", example="running shoes")],
-) -> RetrievalResponse:
+    query: Annotated[
+        str,
+        Query(min_length=1, description="Search query.", examples=["running shoes"]),
+    ],
+    b_online: Annotated[
+        bool,
+        Query(description="If true, return SERP for online search.", examples=[True]),
+    ] = False,
+) -> RetrievalResponse | RunRetrievalResponse:
     """Retrieves ranked results for a query."""
     if not es_client.ping():
-        raise HTTPException(status_code=503, detail="Elasticsearch is not reachable. Check the URL in the environment variables.")
+        raise HTTPException(
+            status_code=503,
+            detail="Elasticsearch is not reachable. Check the URL in the environment variables.",
+        )
 
     if not es_client.indices.exists(index=ES_INDEX_NAME):
         raise HTTPException(status_code=404, detail="Index not found.")
 
     # TODO: Implement the actual search logic here.
-    results = None  # Replace with actual search results from Elasticsearch.
-    return RetrievalResponse(itemlist=results)
+    results = []  # TODO: Replace with actual search results from Elasticsearch.
+
+    if b_online:
+        return RetrievalResponse(itemlist=results, num_found=len(results))
+    return RunRetrievalResponse(doc_list=results)
 
 
 if __name__ == "__main__":
